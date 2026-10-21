@@ -9,7 +9,7 @@ Creates, in order:
   5. The AgentCore Gateway (protocol=MCP, authorizer=CUSTOM_JWT)
   6. A Gateway Target that maps the Lambda's two tools into MCP tools
 
-Writes deploy/gateway/.gateway_config.json, which app/agent/agent.py,
+Writes deploy/gateway/.gateway_config.json, which app/agent/local_agent.py,
 app/agent/runtime_app.py, and teardown_gateway.py all read.
 
 Requires AWS credentials with permission to create IAM roles, Lambda

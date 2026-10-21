@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MCP_SERVER = REPO_ROOT / "app" / "mcp_tool" / "server.py"
-AGENT = REPO_ROOT / "app" / "agent" / "agent.py"
+AGENT = REPO_ROOT / "app" / "agent" / "local_agent.py"
 MCP_HOST, MCP_PORT = "127.0.0.1", 8000
 
 

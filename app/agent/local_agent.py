@@ -9,8 +9,8 @@
 Usage:
     python app/mcp_tool/server.py &              # starts the local MCP tool
     python deploy/gateway/setup_gateway.py        # one-time: provisions the Gateway
-    python app/agent/agent.py "What's the status of order A100?"
-    python app/agent/agent.py "What's 12 * (3 + 4), and is order A200 shipped yet?"
+    python app/agent/local_agent.py "What's the status of order A100?"
+    python app/agent/local_agent.py "What's 12 * (3 + 4), and is order A200 shipped yet?"
 
 If deploy/gateway/.gateway_config.json doesn't exist yet, the agent still runs
 with just the local MCP tool -- useful for testing pieces #2/#3/#4 before

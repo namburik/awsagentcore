@@ -8,16 +8,16 @@ external client would).
 | # | Piece | File |
 |---|-------|------|
 | 1 | AgentCore **Gateway** | `deploy/gateway/setup_gateway.py` (infra), `app/lambda_tool.py` (the tool logic it fronts) |
-| 2 | **Agent** (Strands) | `app/agent/agent.py` / `app/agent/runtime_app.py` |
+| 2 | **Agent** (Strands) | `app/agent/local_agent.py` / `app/agent/runtime_app.py` |
 | 3 | **MCP tool** (plain, no Gateway) | `app/mcp_tool/server.py` |
-| 4 | **LLM call** (Bedrock) | `app/agent/agent.py` / `app/agent/runtime_app.py` (`BedrockModel`) |
+| 4 | **LLM call** (Bedrock) | `app/agent/local_agent.py` / `app/agent/runtime_app.py` (`BedrockModel`) |
 | 5 | **AgentCore Runtime** | `app/agent/runtime_app.py`, deployed via `agentcore deploy` |
 | 6 | **Runtime client** | `app/agent/client.py` |
 
 ```
 app/                  # application code
   agent/
-    agent.py           # local dev runner: Bedrock LLM + local MCP tool + Gateway, all direct
+    local_agent.py     # local dev runner: Bedrock LLM + local MCP tool + Gateway, all direct
     runtime_app.py      # entrypoint deployed to AgentCore Runtime (talks to Gateway internally)
     client.py           # external client: calls the deployed Runtime, nothing else
   mcp_tool/
@@ -43,11 +43,11 @@ Gateway and Lambda are always real AWS resources (created once by
 `setup_gateway.py`, shared by both modes below). What differs is where the
 *agent* runs and how you reach it.
 
-**Local mode** — `app/agent/agent.py` runs on your machine and talks to
+**Local mode** — `app/agent/local_agent.py` runs on your machine and talks to
 everything directly:
 
 ```
-you → agent.py (on your laptop)
+you → local_agent.py (on your laptop)
         ├─→ local MCP server (127.0.0.1:8000)         [piece #3]
         ├─→ Gateway (Cognito OAuth) → Lambda tool      [piece #1]
         └─→ Bedrock (Converse API)                     [piece #4]
@@ -107,7 +107,7 @@ Or step by step:
 
 2. Run the agent (tests #2 Agent, #4 LLM call, and both tool sources):
    ```bash
-   python app/agent/agent.py "What's the status of order A100, and what's 12 * (3 + 4)?"
+   python app/agent/local_agent.py "What's the status of order A100, and what's 12 * (3 + 4)?"
    ```
    If you haven't provisioned the Gateway yet, the agent still runs fine
    against just the local MCP tool -- useful for checking #2/#3/#4 in
@@ -187,7 +187,7 @@ python deploy/gateway/teardown_gateway.py   # Gateway, Lambda, IAM roles, Cognit
   `us-east-1` set here).
 - The Gateway uses `CUSTOM_JWT` auth (Cognito, `client_credentials` grant) --
   the standard way AgentCore Gateway secures its MCP endpoint for
-  machine-to-machine callers. `app/agent/agent.py` and `app/agent/runtime_app.py`
+  machine-to-machine callers. `app/agent/local_agent.py` and `app/agent/runtime_app.py`
   fetch the token automatically via Strands' `MCPClientCredentials`.
 - `deploy/gateway/.gateway_config.json` and `.bedrock_agentcore.yaml` both
   contain account-specific state and are gitignored -- the former has a
