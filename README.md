@@ -7,7 +7,7 @@ external client would).
 
 | # | Piece | File |
 |---|-------|------|
-| 1 | AgentCore **Gateway** | `deploy/gateway/setup_gateway.py`, `deploy/gateway/lambda_tool.py` |
+| 1 | AgentCore **Gateway** | `deploy/gateway/setup_gateway.py` (infra), `app/lambda_tool.py` (the tool logic it fronts) |
 | 2 | **Agent** (Strands) | `app/agent/agent.py` / `app/agent/runtime_app.py` |
 | 3 | **MCP tool** (plain, no Gateway) | `app/mcp_tool/server.py` |
 | 4 | **LLM call** (Bedrock) | `app/agent/agent.py` / `app/agent/runtime_app.py` (`BedrockModel`) |
@@ -22,12 +22,18 @@ app/                  # application code
     client.py           # external client: calls the deployed Runtime, nothing else
   mcp_tool/
     server.py           # standalone local MCP tool server
-deploy/                # infra provisioning (not shipped in the Runtime image)
+  lambda_tool.py         # same get_order_status/calculate logic as mcp_tool/server.py,
+                          # packaged as the Lambda handler behind the Gateway target
+deploy/                # infra provisioning (not shipped in the Runtime image, no business logic)
   gateway/
-    setup_gateway.py    # creates IAM roles, Lambda, Cognito, the Gateway + Target
+    setup_gateway.py    # creates IAM roles, Lambda (from app/lambda_tool.py), Cognito, Gateway + Target
     teardown_gateway.py # deletes everything setup_gateway.py created
-    lambda_tool.py       # the Lambda handler behind the Gateway target
     cognito_setup.py     # Cognito user pool / app client for Gateway auth
+  runtime/
+    deploy_runtime.py   # wraps `agentcore configure`+`deploy`, injects Gateway creds as env vars
+    destroy_runtime.py   # wraps `agentcore destroy`
+  local/
+    run_local.py         # one-command local test: starts the MCP server, runs the agent, stops it
 .bedrock_agentcore.yaml  # agentcore CLI's own state file (toolkit-managed, project root)
 ```
 
@@ -86,6 +92,13 @@ Takes 1-2 minutes. On success it writes `deploy/gateway/.gateway_config.json`
 
 ## Local deployment
 
+One command (starts the MCP server, runs the agent, stops the server):
+```bash
+python deploy/local/run_local.py "What's the status of order A100, and what's 12 * (3 + 4)?"
+```
+
+Or step by step:
+
 1. Start the local MCP tool server (tests piece #3 on its own):
    ```bash
    python app/mcp_tool/server.py
@@ -114,70 +127,55 @@ Takes 1-2 minutes. On success it writes `deploy/gateway/.gateway_config.json`
 
 ## AWS deployment
 
-1. Configure and deploy the agent to AgentCore Runtime (builds an ARM64
-   container via CodeBuild -- no local Docker required):
-   ```bash
-   agentcore configure --create --entrypoint app/agent/runtime_app.py \
-     --name agentcore_demo_runtime_agent --requirements-file requirements.txt \
-     --region us-east-1 --protocol HTTP --non-interactive
-   ```
+One command (runs `agentcore configure` on first use, works around the two
+toolkit bugs below automatically, then `agentcore deploy` with the Gateway's
+credentials injected as Runtime env vars):
+```bash
+python deploy/runtime/deploy_runtime.py
+```
 
-   > `agentcore configure --create` has a toolkit bug where it skips
-   > Dockerfile generation. If the deploy below fails with `open Dockerfile:
-   > no such file or directory`, generate it once with the toolkit's own
-   > `ContainerRuntime.generate_dockerfile()` (see
-   > `bedrock_agentcore_starter_toolkit/utils/runtime/container.py`), and set
-   > `ecr_auto_create: true` in `.bedrock_agentcore.yaml` if it also
-   > complains about a missing ECR repository.
+> Why it's not just a raw `agentcore deploy`: `agentcore configure --create`
+> has a toolkit bug where it skips Dockerfile generation, and
+> `ecr_auto_create` isn't enabled by default -- both break a from-scratch
+> deploy. `deploy_runtime.py` detects and fixes both every run (generates
+> the Dockerfile via the toolkit's own `ContainerRuntime.generate_dockerfile()`
+> if missing, flips `ecr_auto_create: true` in `.bedrock_agentcore.yaml` if
+> needed) before calling `agentcore deploy`.
 
-2. Pass the Gateway's values into the Runtime as env vars and deploy:
-   ```bash
-   export GATEWAY_URL=$(python3 -c "import json;print(json.load(open('deploy/gateway/.gateway_config.json'))['gateway_url'])")
-   export GATEWAY_CLIENT_ID=$(python3 -c "import json;print(json.load(open('deploy/gateway/.gateway_config.json'))['cognito']['client_id'])")
-   export GATEWAY_CLIENT_SECRET=$(python3 -c "import json;print(json.load(open('deploy/gateway/.gateway_config.json'))['cognito']['client_secret'])")
-   export GATEWAY_SCOPE=$(python3 -c "import json;print(json.load(open('deploy/gateway/.gateway_config.json'))['cognito']['scope'])")
+Then check it's ready and call it as an external client would -- straight to
+the Runtime, never the Gateway:
+```bash
+agentcore status
+python app/agent/client.py "What's the status of order A100?"
+```
 
-   agentcore deploy --agent agentcore_demo_runtime_agent \
-     --env GATEWAY_URL="$GATEWAY_URL" --env GATEWAY_CLIENT_ID="$GATEWAY_CLIENT_ID" \
-     --env GATEWAY_CLIENT_SECRET="$GATEWAY_CLIENT_SECRET" --env GATEWAY_SCOPE="$GATEWAY_SCOPE" \
-     --env BEDROCK_MODEL_ID="us.amazon.nova-2-lite-v1:0"
-   ```
-   Takes under a minute once the Dockerfile/ECR issues above are sorted.
-   Prints the deployed agent's ARN and saves it into `.bedrock_agentcore.yaml`.
+Example output:
+```
+[client] Invoking agent with prompt: What's the status of order A100?
+[client] Response: Your order A100 has been shipped and is expected to arrive by October 23, 2026.
+```
 
-3. Check it's ready, then call it as an external client would -- straight to
-   the Runtime, never the Gateway:
-   ```bash
-   agentcore status
-   python app/agent/client.py "What's the status of order A100?"
-   ```
+`client.py` reads the agent's ARN from `.bedrock_agentcore.yaml` and calls
+`bedrock-agentcore.invoke_agent_runtime()` directly via boto3 -- the same
+call `agentcore invoke` makes under the hood, just without the CLI.
 
-   Example output:
-   ```
-   [client] Invoking agent with prompt: What's the status of order A100?
-   [client] Response: Your order A100 has been shipped and is expected to arrive by October 23, 2026.
-   ```
-
-   `client.py` reads the agent's ARN from `.bedrock_agentcore.yaml` and calls
-   `bedrock-agentcore.invoke_agent_runtime()` directly via boto3 -- the same
-   call `agentcore invoke` makes under the hood, just without the CLI.
-
-4. To confirm the Gateway hop actually happened (rather than the model
-   guessing), tail the Runtime's logs for that invocation:
-   ```bash
-   agentcore status   # prints the exact log group/stream-prefix to use
-   aws logs tail "/aws/bedrock-agentcore/runtimes/<agent-id>-DEFAULT" \
-     --log-stream-name-prefix "<date>/[runtime-logs]" --since 10m
-   ```
-   You should see an OAuth token fetch against the Cognito domain followed by
-   `POST .../mcp` calls to the Gateway URL.
+To confirm the Gateway hop actually happened (rather than the model
+guessing), tail the Runtime's logs for that invocation:
+```bash
+agentcore status   # prints the exact log group/stream-prefix to use
+aws logs tail "/aws/bedrock-agentcore/runtimes/<agent-id>-DEFAULT" \
+  --log-stream-name-prefix "<date>/[runtime-logs]" --since 10m
+```
+You should see an OAuth token fetch against the Cognito domain followed by
+`POST .../mcp` calls to the Gateway URL.
 
 ## Tear down
 
 ```bash
+python deploy/runtime/destroy_runtime.py    # Runtime, ECR repo, CodeBuild project
 python deploy/gateway/teardown_gateway.py   # Gateway, Lambda, IAM roles, Cognito pool
-agentcore destroy                           # Runtime, Memory, ECR repo
 ```
+(`destroy_runtime.py` doesn't remove the Memory resource -- see its docstring.)
 
 ## Notes
 

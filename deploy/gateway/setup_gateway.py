@@ -3,14 +3,14 @@
 
 Creates, in order:
   1. IAM execution role for the Lambda tool
-  2. The Lambda function (gateway/lambda_tool.py)
+  2. The Lambda function (app/lambda_tool.py)
   3. IAM execution role for the Gateway itself (lets it invoke the Lambda)
   4. A Cognito user pool / app client for machine-to-machine auth (JWT)
   5. The AgentCore Gateway (protocol=MCP, authorizer=CUSTOM_JWT)
   6. A Gateway Target that maps the Lambda's two tools into MCP tools
 
-Writes gateway/.gateway_config.json, which agent/agent.py and
-teardown_gateway.py both read.
+Writes deploy/gateway/.gateway_config.json, which app/agent/agent.py,
+app/agent/runtime_app.py, and teardown_gateway.py all read.
 
 Requires AWS credentials with permission to create IAM roles, Lambda
 functions, Cognito user pools, and AgentCore Gateways. Re-run
@@ -27,6 +27,8 @@ from pathlib import Path
 import boto3
 
 HERE = Path(__file__).parent
+REPO_ROOT = HERE.parent.parent
+LAMBDA_SOURCE_PATH = REPO_ROOT / "app" / "lambda_tool.py"
 sys.path.insert(0, str(HERE))
 from cognito_setup import create_cognito_resources  # noqa: E402
 CONFIG_PATH = HERE / ".gateway_config.json"
@@ -62,7 +64,7 @@ TOOL_SCHEMA = [
 def _zip_lambda_source() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(HERE / "lambda_tool.py", arcname="lambda_tool.py")
+        zf.write(LAMBDA_SOURCE_PATH, arcname="lambda_tool.py")
     return buf.getvalue()
 
 
