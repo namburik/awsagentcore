@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+deploy/gateway/.gateway_config.json
+.env
+.claude/
+.bedrock_agentcore.yaml
